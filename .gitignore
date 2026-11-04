@@ -1,0 +1,33 @@
+# deps
+node_modules/
+
+# build output
+dist/
+build/
+.turbo/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# prisma generated client (regenerates on install)
+packages/api/prisma/generated/
+
+# Personal planning artefacts (not for the public repo)
+CLAUDE.md
+SPEC.md
+tasks/
+memory/
+.claude/

@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* Tailwind v4 — tokens live in CSS. Values are oklch for perceptual uniformity
+ * (consistent lightness across hues). Change --color-accent to retheme. */
+@theme {
+  --color-bg: oklch(0.145 0.012 260);
+  --color-surface: oklch(0.195 0.015 260);
+  --color-surface-hover: oklch(0.225 0.015 260);
+  --color-border: oklch(0.28 0.015 260);
+  --color-text: oklch(0.95 0 0);
+  --color-muted: oklch(0.65 0.015 240);
+  --color-accent: oklch(0.72 0.17 250);
+  --color-conflict: oklch(0.68 0.18 25);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, legible scrollbars for the card list */
+.scroll-y-thin::-webkit-scrollbar { width: 6px; }
+.scroll-y-thin::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
