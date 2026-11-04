@@ -1,0 +1,40 @@
+# deps + build output (re-installed/generated inside the image)
+node_modules
+**/node_modules
+dist
+build
+.turbo
+
+# vcs + CI
+.git
+.github
+
+# env — must not leak into the image
+.env
+.env.*
+!packages/*/.env.example
+
+# IDE
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# logs
+*.log
+pnpm-debug.log*
+
+# private planning artefacts (also gitignored)
+CLAUDE.md
+SPEC.md
+memory
+tasks
+.claude
+
+# web + docs aren't needed by the API image
+packages/web
+docs
+README.md
+
+# Prisma generated client regenerates on build
+packages/api/prisma/generated
