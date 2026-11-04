@@ -32,7 +32,8 @@ tasks
 .claude
 
 # web + docs aren't needed by the API image
-packages/web
+packages/web/
+!packages/web/package.json
 docs
 README.md
 
