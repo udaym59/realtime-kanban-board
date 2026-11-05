@@ -2,7 +2,7 @@
 
 A collaborative Kanban board where multiple users rearrange cards simultaneously. Every drop fans out to every open tab within one network round-trip, with optimistic UI, server-authoritative conflict resolution, and a `LISTEN/NOTIFY`-based fan-out that keeps Redis out of the stack.
 
-- **Live demo:** _(deploy in progress)_
+- **Live demo:** [realtime-kanban-web.onrender.com](https://realtime-kanban-web.onrender.com) — open in two tabs to watch cards sync. First visit may stall ~30s while the free-tier API cold-starts.
 - **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ## What's in it
