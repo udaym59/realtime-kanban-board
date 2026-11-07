@@ -69,9 +69,13 @@ export const SubscribeBoardMessage = z.object({
 });
 export type SubscribeBoardMessage = z.infer<typeof SubscribeBoardMessage>;
 
+// `body` is optional on create — matches the Card entity's nullable body
+// column. Clients that don't collect a description can omit the key; the
+// AddCardForm sends it only when the user actually typed something.
 export const CreateCardMessage = z.object({
   columnId: Uuid,
   title: z.string().min(1).max(500),
+  body: z.string().max(10_000).nullable().optional(),
 });
 export type CreateCardMessage = z.infer<typeof CreateCardMessage>;
 
@@ -87,6 +91,29 @@ export const MoveCardMessage = z.object({
 });
 export type MoveCardMessage = z.infer<typeof MoveCardMessage>;
 
+// v1.1 — card detail editing.
+// At least one of title / body must be present; enforced by the refine below.
+// `body` accepts explicit null (clear the field) or a string; omitting it is
+// "do not touch". Same contract for the service layer.
+export const UpdateCardMessage = z
+  .object({
+    cardId: Uuid,
+    title: z.string().min(1).max(500).optional(),
+    body: z.string().max(10_000).nullable().optional(),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .refine(
+    (v) => v.title !== undefined || v.body !== undefined,
+    { message: 'at least one of title or body must be provided' },
+  );
+export type UpdateCardMessage = z.infer<typeof UpdateCardMessage>;
+
+export const DeleteCardMessage = z.object({
+  cardId: Uuid,
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type DeleteCardMessage = z.infer<typeof DeleteCardMessage>;
+
 export const CreateColumnMessage = z.object({
   boardId: Uuid,
   name: z.string().min(1).max(100),
@@ -98,3 +125,19 @@ export const RenameColumnMessage = z.object({
   name: z.string().min(1).max(100),
 });
 export type RenameColumnMessage = z.infer<typeof RenameColumnMessage>;
+
+
+// ---------------------------------------------------------------------------
+// v1.2 — presence (guest sessions, ephemeral)
+// ---------------------------------------------------------------------------
+// Cursor coords are content-space pixels (relative to the board scroll
+// container's top-left, including scroll offset). Not normalised — see
+// ADR 004 for the trade-off. Finite guard + magnitude ceiling stops a
+// malicious or buggy client from emitting NaN/Infinity/huge values that
+// would wreck the receiver's layout.
+
+export const CursorMessage = z.object({
+  x: z.number().finite().min(-100_000).max(100_000),
+  y: z.number().finite().min(-100_000).max(100_000),
+});
+export type CursorMessage = z.infer<typeof CursorMessage>;

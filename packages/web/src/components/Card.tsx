@@ -2,8 +2,21 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Card as CardT } from 'shared';
 
-// Interactive card — used inside SortableContext in each column
-export function Card({ card }: { card: CardT }) {
+// Interactive card — used inside SortableContext in each column.
+//
+// Click-vs-drag separation: the drag listeners are attached to the whole
+// card wrapper (so the whole surface is grabbable), but the drag sensor is
+// already configured with `activationConstraint: { distance: 6 }` in
+// <Board>, so a plain click never starts a drag. A pointerup without a
+// preceding drag fires the `onOpen` callback.
+
+export function Card({
+  card,
+  onOpen,
+}: {
+  card: CardT;
+  onOpen: (cardId: string) => void;
+}) {
   const {
     attributes,
     listeners,
@@ -20,7 +33,23 @@ export function Card({ card }: { card: CardT }) {
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      // pointer sensor's activation distance guarantees this fires only on
+      // a true click (no drag path crossed the 6px threshold)
+      onClick={() => onOpen(card.id)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen(card.id);
+        }
+      }}
+    >
       <CardView card={card} />
     </div>
   );

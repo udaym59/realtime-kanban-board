@@ -7,6 +7,7 @@ Decision log for the structural choices behind this project. Each decision names
 1. [Database — Postgres (via Neon)](#database--postgres-via-neon)
 2. [Card position — Fractional indexing](#card-position--fractional-indexing)
 3. [Fan-out — Postgres `LISTEN/NOTIFY` (not Redis)](#fan-out--postgres-listennotify-not-redis)
+4. [Presence — Direct Socket.io (not `LISTEN/NOTIFY`)](#presence--direct-socketio-not-listennotify)
 
 ---
 
@@ -111,3 +112,47 @@ Switch to Redis pub/sub (via `@socket.io/redis-adapter`) when any of these becom
 - **Redis pub/sub.** Standard, scales further, requires one more managed service.
 - **NATS.** Overkill for v1.
 - **No fan-out, sticky sessions only.** Fails as soon as the API runs on more than one node.
+
+
+---
+
+## Presence — Direct Socket.io (not `LISTEN/NOTIFY`)
+
+### Context
+
+Cursor positions and "who is on this board right now" are useful UX signals for a collaborative demo. They also violate every assumption the card fan-out decision rested on: they are tiny, high-rate, and recoverable on the next frame.
+
+### Decision
+
+Keep card state on `LISTEN/NOTIFY` (above). Route **presence events directly over Socket.io room broadcasts** — `io.to('board:${boardId}').emit(...)` — without touching Postgres.
+
+Each socket on `connection` is assigned an ephemeral `{ guestId, name, color }` identity. Lifetime equals the socket's lifetime: no cookie, no database row. Three events ship over the wire:
+
+- `presence.join` — broadcast when a client subscribes to a board.
+- `presence.leave` — broadcast when a client disconnects.
+- `presence.cursor` — client-throttled at ~30 Hz, re-broadcast to the room excluding the sender.
+
+### Why not through the same bus
+
+- **Rate.** Mouse moves at ~30 Hz per active user. Server-side re-broadcast scales *O(N²)* — a five-user board emits around 750 events/second before any card events. That is already above the `LISTEN/NOTIFY` upgrade trigger (see the previous section) and would starve the card path.
+- **Durability.** `pg_notify` is best-effort within a transaction. Card events can rely on that because durability lives in the committed row, not the notification. Presence has no row; a dropped cursor update is simply overwritten by the next one 33 ms later. No bus-level durability guarantee is needed.
+- **Transactional coupling.** Card events fire `pg_notify` *inside the write transaction* so delivery is contingent on commit. Cursors are not tied to Postgres at all; routing them through the bus would add a database round-trip per mousemove for zero correctness gain.
+- **Payload ceiling.** `pg_notify` caps payloads at 8 KB — fine for individual cursor messages, but cumulatively it is still the narrowest pipe in the system.
+
+### Trade-offs
+
+Direct `io.to(room).emit` reaches only sockets on the same API node. A multi-node deployment would split cursors across islands.
+
+This is accepted because:
+
+1. The current deployment target is single-node (see the `LISTEN/NOTIFY` upgrade triggers above — the first is "more than ~5 instances").
+2. The fix is the Socket.io Redis adapter, which handles multi-node room broadcasts natively without any change to the presence code. Presence is already on the correct abstraction (Socket.io rooms); the adapter plugs in underneath when it is needed.
+3. Card state remains correct under multi-node because it continues to use `LISTEN/NOTIFY`.
+
+In short: presence inherits the same upgrade path the card fan-out already plans for, while `LISTEN/NOTIFY` stays dedicated to durable state.
+
+### Alternatives considered
+
+- **Persist `guestId` in a cookie.** Would give identity continuity across reconnects. Costs CORS cookie handling and a persistence surface for a feature that is deliberately ephemeral. Not worth it for a demo — reconnect = new guest is a legible semantic.
+- **Push cursors through `pg_notify`.** Would funnel the highest-rate ephemeral stream through the narrowest, most expensive pipe. Rejected on the rate and payload arguments above.
+- **Add OAuth and skip the ephemeral layer.** Loses the "visitors can immediately see collaboration" signal that justifies the feature at all. OAuth is a later concern.

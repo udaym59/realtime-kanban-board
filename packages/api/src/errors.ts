@@ -6,8 +6,14 @@
 // but defense in depth).
 
 export class NotFoundError extends Error {
+  // `what` is the full locator kept on the instance for logs
+  // (e.g. "card <uuid>", "column <uuid>"). The thrown Error's message
+  // is trimmed to just the entity type so that when a socket handler
+  // forwards it as the ack.message, a user never sees a raw UUID.
+  // The id is still in logger context via { cardId, boardId } etc.
   constructor(public what: string) {
-    super(`${what} not found`);
+    const entity = what.split(' ')[0] ?? what;
+    super(`${entity} not found`);
     this.name = 'NotFoundError';
   }
 }

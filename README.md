@@ -1,6 +1,6 @@
 # Realtime Kanban
 
-A collaborative Kanban board where multiple users rearrange cards simultaneously. Every drop fans out to every open tab within one network round-trip, with optimistic UI, server-authoritative conflict resolution, and a `LISTEN/NOTIFY`-based fan-out that keeps Redis out of the stack.
+A collaborative Kanban board where multiple users rearrange and edit cards simultaneously. Every change fans out to every open tab within one network round-trip, with optimistic UI, server-authoritative conflict resolution, and a `LISTEN/NOTIFY`-based fan-out that keeps Redis out of the stack.
 
 - **Live demo:** [realtime-kanban-web.onrender.com](https://realtime-kanban-web.onrender.com) — open in two tabs to watch cards sync. First visit may stall ~30s while the free-tier API cold-starts.
 - **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
@@ -8,9 +8,11 @@ A collaborative Kanban board where multiple users rearrange cards simultaneously
 ## What's in it
 
 - Drag cards within a column and across columns via `@dnd-kit`
-- Optimistic UI with snapshot refetch on conflict — the server owns final order
+- Click any card to open a detail drawer — edit title and description inline with optimistic save-on-blur, <kbd>⌘/Ctrl+Enter</kbd> to commit, one-step confirm to delete
+- Optimistic UI across move, edit, and delete; snapshot refetch on conflict so the server owns final state
 - Concurrent moves resolved via optimistic locking (`version` column) plus a fractional-index retry loop that tightens the range on `P2002` collisions
 - Realtime fan-out over Postgres `LISTEN/NOTIFY` — one less managed service
+- Lightweight anonymous presence — every connected user gets a coloured guest identity, a live cursor, and shows in a top-right avatar strip. Presence deliberately bypasses the `LISTEN/NOTIFY` bus (see the architecture doc for the trade-off)
 - Full type safety across the HTTP and WebSocket boundary via shared Zod schemas
 
 ## Stack
@@ -20,8 +22,8 @@ A collaborative Kanban board where multiple users rearrange cards simultaneously
 | Frontend | React 19, Vite 8, Zustand 5, `@dnd-kit`, Tailwind v4 |
 | Backend | Node 22, Express 5, Socket.io 4, Prisma 6, Zod 4 |
 | Database | Postgres (Neon free tier) |
-| Realtime | Postgres `LISTEN/NOTIFY` → Socket.io rooms |
-| Deploy | Vercel (web) + Koyeb (API) + Neon (DB) |
+| Realtime | Postgres `LISTEN/NOTIFY` → Socket.io rooms (card state) + direct Socket.io broadcasts (presence) |
+| Deploy | Render (web) + Render (API) + Neon (DB) |
 
 ## Architecture at a glance
 
@@ -42,7 +44,7 @@ sequenceDiagram
   API-->>B: card.moved
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full decision log — database choice, fractional indexing, fan-out strategy, and the upgrade triggers for each.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full decision log — database choice, fractional indexing, fan-out strategy, presence's divergence from that path, and the upgrade triggers for each.
 
 ## Running locally
 
@@ -68,26 +70,29 @@ pnpm dev
 
 ```
 packages/
-├── shared/              Zod schemas + socket event contracts
+├── shared/              Zod schemas + socket event contracts (card + presence)
 ├── api/
 │   ├── prisma/          schema + migrations + seed
 │   ├── scripts/         smoke tests (2-client concurrency verification)
 │   └── src/
 │       ├── db/          Prisma client + LISTEN/NOTIFY bridge
+│       ├── presence/    guest-identity generator (adjective + noun + colour)
 │       ├── services/    pure data operations (cards, boards)
 │       ├── routes/      thin Express handlers
-│       ├── sockets/     thin Socket.io handlers
+│       ├── sockets/     thin Socket.io handlers (board, cards, presence)
 │       └── middleware/  error translation + rate limit
 └── web/
     └── src/
-        ├── hooks/       useBoardSocket (owns connection + subscribe)
-        ├── stores/      Zustand board store (idempotent event appliers)
-        └── components/  Board / Column / Card / AddCardForm
+        ├── hooks/       useBoardSocket, usePresence
+        ├── lib/         socket context + friendly-error mapper
+        ├── stores/      Zustand board store + presence store + toast queue
+        └── components/  Board / Column / Card / AddCardForm /
+                         CardDetailDrawer / PresenceLayer / GuestAvatars / Toasts
 ```
 
 ## Smoke tests
 
-The move handler is the project's critical path. Two concurrent-client smoke tests verify behavior under contention against a real Postgres:
+The move, edit, and delete handlers are the project's critical path. Three concurrent-client smoke tests verify behaviour under contention against a real Postgres:
 
 ```bash
 # Create path: client A inserts 10 cards; client B must observe every one.
@@ -97,6 +102,11 @@ pnpm --filter api smoke:create
 # commits or returns a clean conflict; final state converges with zero
 # divergence between the two clients' event-reconstructed views.
 pnpm --filter api smoke:move
+
+# Edit path: A renames, edits body, clears body, then deletes. B must
+# observe every broadcast in order with strictly-monotonic versions,
+# and the HTTP snapshot must not contain the deleted card.
+pnpm --filter api smoke:edit
 ```
 
 ## License

@@ -6,15 +6,25 @@ import { createContext, useContext, type ReactNode } from 'react';
 import type {
   Ack,
   CardCreatedPayload,
+  CardDeletedPayload,
   CardMovedPayload,
+  CardUpdatedPayload,
   CreateCardMessage,
+  CursorMessage,
+  DeleteCardMessage,
   MoveCardMessage,
+  UpdateCardMessage,
 } from 'shared';
 
 export type SocketApi = {
   emit: {
     createCard: (p: CreateCardMessage) => Promise<Ack<CardCreatedPayload>>;
     moveCard: (p: MoveCardMessage) => Promise<Ack<CardMovedPayload>>;
+    updateCard: (p: UpdateCardMessage) => Promise<Ack<CardUpdatedPayload>>;
+    deleteCard: (p: DeleteCardMessage) => Promise<Ack<CardDeletedPayload>>;
+    // Fire-and-forget — no ack. The hook responsible for calling this is
+    // expected to throttle (see usePresence).
+    cursor: (p: CursorMessage) => void;
   };
   refetch: () => Promise<void>;
 };

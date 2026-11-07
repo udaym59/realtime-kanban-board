@@ -1,5 +1,10 @@
 // Composition root. Express + socket.io sharing one http server; Postgres
-// LISTEN/NOTIFY bridge drives fan-out to board rooms.
+// LISTEN/NOTIFY bridge drives card-event fan-out to board rooms.
+//
+// v1.2 (ADR 004): socket.io Server is now generic over SocketData carrying
+// a guest identity. Identity is minted on `connection` BEFORE any handlers
+// are registered so every handler can rely on socket.data being populated.
+// Presence events bypass pg_notify by design — see ADR 004.
 
 import 'dotenv/config';
 import { createServer } from 'node:http';
@@ -7,15 +12,22 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import pinoHttp from 'pino-http';
 import { Server } from 'socket.io';
-import type { ClientToServerEvents, ServerToClientEvents } from 'shared';
+import type {
+  ClientToServerEvents,
+  InterServerEvents,
+  ServerToClientEvents,
+  SocketData,
+} from 'shared';
 
 import { logger } from './lib/logger.js';
 import { disconnectPrisma } from './db/prisma.js';
 import { createPgListener } from './db/listen.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { boardsRouter } from './routes/boards.js';
+import { makeGuest } from './presence/identity.js';
 import { registerBoardSocket } from './sockets/board.js';
 import { registerCardSockets } from './sockets/cards.js';
+import { registerPresenceSockets } from './sockets/presence.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
@@ -47,16 +59,43 @@ app.use(errorHandler);
 
 const httpServer = createServer(app);
 
-const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+const io = new Server<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  InterServerEvents,
+  SocketData
+>(httpServer, {
   cors: { origin: CORS_ORIGIN },
 });
 
 io.on('connection', (socket) => {
-  logger.info({ socketId: socket.id }, 'socket connected');
+  // Mint the guest identity FIRST — every handler below assumes it's set.
+  // Lifetime = this socket; a reconnect creates a fresh guest (ADR 004).
+  const guest = makeGuest();
+  socket.data.guestId = guest.guestId;
+  socket.data.name = guest.name;
+  socket.data.color = guest.color;
+
+  logger.info(
+    { socketId: socket.id, guestId: guest.guestId, name: guest.name },
+    'socket connected',
+  );
+
+  // Tell the client who they are so they can render their own avatar + label
+  socket.emit('presence.self', guest);
+
   registerBoardSocket(io, socket);
   registerCardSockets(io, socket);
+  // Presence last — it owns the 'disconnect' handler for leave broadcasts.
+  // Multiple 'disconnect' listeners are fine (socket.io emits to all), but
+  // keeping it adjacent to the register call makes the lifecycle legible.
+  registerPresenceSockets(io, socket);
+
   socket.on('disconnect', (reason) => {
-    logger.info({ socketId: socket.id, reason }, 'socket disconnected');
+    logger.info(
+      { socketId: socket.id, guestId: socket.data.guestId, reason },
+      'socket disconnected',
+    );
   });
 });
 

@@ -5,7 +5,15 @@ import type { Card as CardT, Column as ColumnT } from 'shared';
 import { Card } from './Card.js';
 import { AddCardForm } from './AddCardForm.js';
 
-export function Column({ column, cards }: { column: ColumnT; cards: CardT[] }) {
+export function Column({
+  column,
+  cards,
+  onCardOpen,
+}: {
+  column: ColumnT;
+  cards: CardT[];
+  onCardOpen: (cardId: string) => void;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const prevCount = useRef(cards.length);
@@ -49,7 +57,7 @@ export function Column({ column, cards }: { column: ColumnT; cards: CardT[] }) {
           className="scroll-y-thin min-h-10 flex-1 space-y-2 overflow-y-auto px-3 pb-2"
         >
           {cards.map((c) => (
-            <Card key={c.id} card={c} />
+            <Card key={c.id} card={c} onOpen={onCardOpen} />
           ))}
         </div>
       </SortableContext>

@@ -11,7 +11,12 @@
 
 import pg from 'pg';
 import type { Server } from 'socket.io';
-import type { ClientToServerEvents, ServerToClientEvents } from 'shared';
+import type {
+  ClientToServerEvents,
+  InterServerEvents,
+  ServerToClientEvents,
+  SocketData,
+} from 'shared';
 import { NotifyPayloadSchema } from 'shared';
 import { logger } from '../lib/logger.js';
 
@@ -19,7 +24,7 @@ const { Client } = pg;
 const CHANNEL = 'card_events';
 const MAX_BACKOFF_MS = 30_000;
 
-type IO = Server<ClientToServerEvents, ServerToClientEvents>;
+type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 export function createPgListener(io: IO) {
   let backoffMs = 500;
@@ -52,6 +57,12 @@ export function createPgListener(io: IO) {
         break;
       case 'card.moved':
         io.to(room).emit('card.moved', parsed.data.data);
+        break;
+      case 'card.updated':
+        io.to(room).emit('card.updated', parsed.data.data);
+        break;
+      case 'card.deleted':
+        io.to(room).emit('card.deleted', parsed.data.data);
         break;
       case 'column.created':
         io.to(room).emit('column.created', { column: parsed.data.data });

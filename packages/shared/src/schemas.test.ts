@@ -233,3 +233,106 @@ describe('NotifyPayloadSchema', () => {
     expect(r.success).toBe(false);
   });
 });
+
+// v1.1 — card detail editing shapes
+import {
+  UpdateCardMessage,
+  DeleteCardMessage,
+} from './schemas.js';
+
+describe('UpdateCardMessage', () => {
+  it('parses a title-only update', () => {
+    const r = UpdateCardMessage.safeParse({
+      cardId: UUID_A,
+      title: 'New title',
+      expectedVersion: 2,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('parses a body-only update (including explicit null to clear)', () => {
+    const r = UpdateCardMessage.safeParse({
+      cardId: UUID_A,
+      body: null,
+      expectedVersion: 2,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects when both title and body are omitted', () => {
+    const r = UpdateCardMessage.safeParse({
+      cardId: UUID_A,
+      expectedVersion: 2,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects an empty title (DB invariant)', () => {
+    const r = UpdateCardMessage.safeParse({
+      cardId: UUID_A,
+      title: '',
+      expectedVersion: 2,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects an overlong body', () => {
+    const r = UpdateCardMessage.safeParse({
+      cardId: UUID_A,
+      body: 'x'.repeat(10_001),
+      expectedVersion: 2,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe('DeleteCardMessage', () => {
+  it('parses a valid delete', () => {
+    const r = DeleteCardMessage.safeParse({
+      cardId: UUID_A,
+      expectedVersion: 3,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects a negative expectedVersion', () => {
+    const r = DeleteCardMessage.safeParse({
+      cardId: UUID_A,
+      expectedVersion: -1,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe('NotifyPayloadSchema — v1.1 variants', () => {
+  it('parses a card.updated payload with partial fields', () => {
+    const r = NotifyPayloadSchema.safeParse({
+      type: 'card.updated',
+      boardId: UUID_A,
+      data: {
+        cardId: UUID_B,
+        newVersion: 5,
+        title: 'Refined',
+      },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('parses a card.updated payload with body=null (cleared)', () => {
+    const r = NotifyPayloadSchema.safeParse({
+      type: 'card.updated',
+      boardId: UUID_A,
+      data: { cardId: UUID_B, newVersion: 6, body: null },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('parses a card.deleted payload', () => {
+    const r = NotifyPayloadSchema.safeParse({
+      type: 'card.deleted',
+      boardId: UUID_A,
+      data: { cardId: UUID_B },
+    });
+    expect(r.success).toBe(true);
+  });
+});

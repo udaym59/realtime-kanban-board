@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -13,8 +13,13 @@ import { arrayMove } from '@dnd-kit/sortable';
 import { generateKeyBetween } from 'fractional-indexing';
 import { useBoardStore } from '../stores/boardStore.js';
 import { useSocket } from '../lib/socket-context.js';
+import { usePresence } from '../hooks/usePresence.js';
 import { Column } from './Column.js';
 import { CardView } from './Card.js';
+import { CardDetailDrawer } from './CardDetailDrawer.js';
+import { PresenceLayer } from './PresenceLayer.js';
+import { useToastStore } from '../stores/toastStore.js';
+import { friendlyErrorOf } from '../lib/friendly-errors.js';
 
 export function Board() {
   const status = useBoardStore((s) => s.status);
@@ -25,10 +30,17 @@ export function Board() {
   const { emit, refetch } = useSocket();
 
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
+
+  // The scrollable board area doubles as the presence capture surface.
+  // Cursor coords are content-space pixels relative to this element's
+  // top-left (plus scrollLeft/scrollTop) — see ADR 004 + usePresence.
+  const boardAreaRef = useRef<HTMLDivElement | null>(null);
+  usePresence(boardAreaRef, status === 'ready');
 
   if (status !== 'ready' || !board) {
     return (
@@ -74,11 +86,6 @@ export function Board() {
     );
     if (!activeCardRef) return;
 
-    // Neighbor resolution branches:
-    //   a) drop on empty column body    → append to end
-    //   b) within-column drop on a card → use arrayMove to compute final order
-    //                                     (needed so "drag down" works)
-    //   c) cross-column drop on a card  → land BEFORE that card
     let afterCardId: string | null = null;
     let beforeCardId: string | null = null;
 
@@ -114,7 +121,6 @@ export function Board() {
       ? colCards.find((c) => c.id === beforeCardId)?.position ?? null
       : null;
 
-    // No-op guard — dropped back at the same spot
     if (
       fromCol === toCol &&
       (afterPos === null || activeCardRef.position > afterPos) &&
@@ -136,6 +142,7 @@ export function Board() {
 
     if (!result.ok) {
       console.warn('card.move rejected:', result.reason, result.message);
+      useToastStore.getState().show(friendlyErrorOf(result));
       try {
         await refetch();
       } catch (err) {
@@ -149,27 +156,44 @@ export function Board() {
       <header className="border-b border-border/30 px-6 py-3">
         <h1 className="text-base font-semibold tracking-tight">{board.name}</h1>
       </header>
-      <main className="flex-1 overflow-x-auto overflow-y-hidden">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-        >
-          <div className="flex h-full min-w-max gap-4 p-6">
-            {columns.map((col) => (
-              <Column
-                key={col.id}
-                column={col}
-                cards={cardsByColumn[col.id] ?? []}
-              />
-            ))}
-          </div>
-          <DragOverlay>
-            {activeCard ? <CardView card={activeCard} dragging /> : null}
-          </DragOverlay>
-        </DndContext>
+      <main
+        ref={boardAreaRef}
+        className="flex-1 overflow-x-auto overflow-y-hidden"
+      >
+        {/* Wrapper is `relative` + `min-w-max` + `h-full` so it spans the
+            FULL scrollable content area. PresenceLayer is its child, so
+            `absolute inset-0` covers the content (not just the viewport)
+            and cursors scroll with the board (ADR 004). */}
+        <div className="relative h-full min-w-max">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          >
+            <div className="flex h-full gap-4 p-6">
+              {columns.map((col) => (
+                <Column
+                  key={col.id}
+                  column={col}
+                  cards={cardsByColumn[col.id] ?? []}
+                  onCardOpen={setOpenCardId}
+                />
+              ))}
+            </div>
+            <DragOverlay>
+              {activeCard ? <CardView card={activeCard} dragging /> : null}
+            </DragOverlay>
+          </DndContext>
+          <PresenceLayer />
+        </div>
       </main>
+      {openCardId ? (
+        <CardDetailDrawer
+          cardId={openCardId}
+          onClose={() => setOpenCardId(null)}
+        />
+      ) : null}
     </>
   );
 }

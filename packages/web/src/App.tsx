@@ -1,6 +1,8 @@
 import { useBoardSocket } from './hooks/useBoardSocket.js';
 import { Board } from './components/Board.js';
 import { ConnectionStatus } from './components/ConnectionStatus.js';
+import { GuestAvatars } from './components/GuestAvatars.js';
+import { Toasts } from './components/Toasts.js';
 import { SocketProvider } from './lib/socket-context.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
@@ -20,9 +22,16 @@ export function App() {
   return (
     <SocketProvider value={{ emit, refetch }}>
       <div className="flex h-full flex-col">
+        {/* Thin top bar with the avatars on the right; the board header
+            underneath still carries the board name. Kept as a separate
+            row so avatar width doesn't push the title around. */}
+        <div className="flex items-center justify-end gap-3 border-b border-border/20 px-4 py-2">
+          <GuestAvatars />
+        </div>
         <Board />
         <ConnectionStatus status={status} />
       </div>
+      <Toasts />
     </SocketProvider>
   );
 }

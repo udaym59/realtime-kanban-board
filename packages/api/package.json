@@ -14,7 +14,8 @@
     "smoke:create": "tsx scripts/smoke-create.ts",
     "smoke:move": "tsx scripts/smoke-move.ts",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke:edit": "tsx scripts/smoke-edit.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",

@@ -10,7 +10,9 @@ import type {
   BoardSnapshot,
   Card,
   CardConflictPayload,
+  CardDeletedPayload,
   CardMovedPayload,
+  CardUpdatedPayload,
   Column,
 } from 'shared';
 
@@ -25,11 +27,21 @@ type BoardState = {
   hydrate: (snap: BoardSnapshot) => void;
   applyCardCreated: (card: Card) => void;
   applyCardMoved: (p: CardMovedPayload) => void;
+  applyCardUpdated: (p: CardUpdatedPayload) => void;
+  applyCardDeleted: (p: CardDeletedPayload) => void;
   applyCardConflict: (p: CardConflictPayload) => void;
   // Local-only move: used by the drag handler to reflect the drop immediately.
   // Does NOT bump version — authoritative version arrives via `card.moved`
   // broadcast from the server, which `applyCardMoved` reconciles idempotently.
   applyOptimisticMove: (cardId: string, toColumnId: string, newPosition: string) => void;
+  // Local-only edit — same contract as applyOptimisticMove: version stays put;
+  // the authoritative `card.updated` broadcast will reconcile with newVersion.
+  applyOptimisticUpdate: (
+    cardId: string,
+    patch: { title?: string; body?: string | null },
+  ) => void;
+  // Local-only removal for an optimistic delete.
+  applyOptimisticDelete: (cardId: string) => void;
 };
 
 function insertSorted<T extends { position: string }>(list: T[], item: T): T[] {
@@ -37,6 +49,17 @@ function insertSorted<T extends { position: string }>(list: T[], item: T): T[] {
   return idx === -1
     ? [...list, item]
     : [...list.slice(0, idx), item, ...list.slice(idx)];
+}
+
+function findCard(
+  cardsByColumn: Record<string, Card[]>,
+  cardId: string,
+): { columnId: string; card: Card } | null {
+  for (const [colId, cards] of Object.entries(cardsByColumn)) {
+    const found = cards.find((c) => c.id === cardId);
+    if (found) return { columnId: colId, card: found };
+  }
+  return null;
 }
 
 export const useBoardStore = create<BoardState>((set) => ({
@@ -82,18 +105,9 @@ export const useBoardStore = create<BoardState>((set) => ({
 
   applyCardMoved: (p) =>
     set((s) => {
-      // Locate the card's current column
-      let fromColumnId: string | null = null;
-      let moving: Card | null = null;
-      for (const [colId, cards] of Object.entries(s.cardsByColumn)) {
-        const found = cards.find((c) => c.id === p.cardId);
-        if (found) {
-          fromColumnId = colId;
-          moving = found;
-          break;
-        }
-      }
-      if (!moving || !fromColumnId) return s;
+      const hit = findCard(s.cardsByColumn, p.cardId);
+      if (!hit) return s;
+      const { columnId: fromColumnId, card: moving } = hit;
 
       // Idempotent: ignore stale or duplicate events
       if (moving.version >= p.newVersion) return s;
@@ -116,22 +130,57 @@ export const useBoardStore = create<BoardState>((set) => ({
       return { cardsByColumn: next };
     }),
 
+  // Idempotency rule, same as move: drop if newVersion <= current. The
+  // card stays in the same column at the same position; only title/body
+  // and version change, so we rewrite in place without re-sorting.
+  applyCardUpdated: (p) =>
+    set((s) => {
+      const hit = findCard(s.cardsByColumn, p.cardId);
+      if (!hit) return s;
+      const { columnId, card } = hit;
+      if (card.version >= p.newVersion) return s;
+
+      const patched: Card = {
+        ...card,
+        version: p.newVersion,
+        ...(p.title !== undefined ? { title: p.title } : {}),
+        ...(p.body !== undefined ? { body: p.body } : {}),
+      };
+      return {
+        cardsByColumn: {
+          ...s.cardsByColumn,
+          [columnId]: (s.cardsByColumn[columnId] ?? []).map((c) =>
+            c.id === p.cardId ? patched : c,
+          ),
+        },
+      };
+    }),
+
+  // Idempotent by construction — filter returns the same list if the card
+  // is already gone. No version check needed: deletion is terminal.
+  applyCardDeleted: (p) =>
+    set((s) => {
+      const hit = findCard(s.cardsByColumn, p.cardId);
+      if (!hit) return s;
+      return {
+        cardsByColumn: {
+          ...s.cardsByColumn,
+          [hit.columnId]: (s.cardsByColumn[hit.columnId] ?? []).filter(
+            (c) => c.id !== p.cardId,
+          ),
+        },
+        conflicts: s.conflicts.filter((c) => c.cardId !== p.cardId),
+      };
+    }),
+
   applyCardConflict: (p) =>
     set((s) => ({ conflicts: [...s.conflicts.slice(-9), p] })),
 
   applyOptimisticMove: (cardId, toColumnId, newPosition) =>
     set((s) => {
-      let fromColumnId: string | null = null;
-      let moving: Card | null = null;
-      for (const [colId, cards] of Object.entries(s.cardsByColumn)) {
-        const found = cards.find((c) => c.id === cardId);
-        if (found) {
-          fromColumnId = colId;
-          moving = found;
-          break;
-        }
-      }
-      if (!moving || !fromColumnId) return s;
+      const hit = findCard(s.cardsByColumn, cardId);
+      if (!hit) return s;
+      const { columnId: fromColumnId, card: moving } = hit;
 
       // Position/column change only — version stays at the original value so
       // the server's authoritative `card.moved` event will pass the idempotency
@@ -151,5 +200,39 @@ export const useBoardStore = create<BoardState>((set) => ({
         updated,
       );
       return { cardsByColumn: next };
+    }),
+
+  applyOptimisticUpdate: (cardId, patch) =>
+    set((s) => {
+      const hit = findCard(s.cardsByColumn, cardId);
+      if (!hit) return s;
+      const { columnId, card } = hit;
+      const patched: Card = {
+        ...card,
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.body !== undefined ? { body: patch.body } : {}),
+      };
+      return {
+        cardsByColumn: {
+          ...s.cardsByColumn,
+          [columnId]: (s.cardsByColumn[columnId] ?? []).map((c) =>
+            c.id === cardId ? patched : c,
+          ),
+        },
+      };
+    }),
+
+  applyOptimisticDelete: (cardId) =>
+    set((s) => {
+      const hit = findCard(s.cardsByColumn, cardId);
+      if (!hit) return s;
+      return {
+        cardsByColumn: {
+          ...s.cardsByColumn,
+          [hit.columnId]: (s.cardsByColumn[hit.columnId] ?? []).filter(
+            (c) => c.id !== cardId,
+          ),
+        },
+      };
     }),
 }));
