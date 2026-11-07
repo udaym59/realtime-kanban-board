@@ -7,14 +7,20 @@ on:
     branches: [main]
 
 jobs:
+  # Render's "Auto-Deploy: After CI Checks Pass" watches this job's status
+  # on each commit via GitHub's commit-status API. Render deploys the exact
+  # SHA whose `check` run succeeded — so CI here stays pure verification,
+  # no deploy step, no webhook, no secrets.
+  #
+  # `pnpm/action-setup@v4` deliberately has no `version:` input — it reads
+  # `packageManager` from the root package.json. Two sources would trip
+  # ERR_PNPM_BAD_PM_VERSION.
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v4
         with:
@@ -29,6 +35,11 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Test (shared schemas)
+        # Only `shared` has tests today. When api/web add vitest later,
+        # swap this for `pnpm -r --if-present run test` to pick them up.
+        run: pnpm --filter shared test
 
       - name: Build
         run: pnpm build
